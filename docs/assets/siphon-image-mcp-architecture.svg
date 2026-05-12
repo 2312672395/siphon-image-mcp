@@ -1,6 +1,6 @@
 <svg width="1280" height="520" viewBox="0 0 1280 520" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
-  <title id="title">Siphon Image MCP architecture</title>
-  <desc id="desc">Agent calls a local MCP server, the MCP server calls SiphonLab GPT-Image-2 image APIs, and generated files are saved locally.</desc>
+  <title id="title">Siphon 图片 MCP 架构图</title>
+  <desc id="desc">MCP 客户端调用本地 MCP 服务，本地 MCP 服务调用 SiphonLab GPT-Image-2 图片接口，并把生成图片保存到本地文件。</desc>
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1280" y2="520" gradientUnits="userSpaceOnUse">
       <stop stop-color="#ECFEFF"/>
@@ -19,8 +19,8 @@
     </marker>
   </defs>
   <rect width="1280" height="520" rx="36" fill="url(#bg)"/>
-  <text x="64" y="70" fill="#0F172A" font-family="Segoe UI, Arial, sans-serif" font-size="34" font-weight="800">Siphon Image MCP</text>
-  <text x="64" y="106" fill="#475569" font-family="Segoe UI, Arial, sans-serif" font-size="18">OpenAI-compatible GPT-Image-2 bridge for MCP clients</text>
+  <text x="64" y="70" fill="#0F172A" font-family="Segoe UI, Microsoft YaHei, Arial, sans-serif" font-size="34" font-weight="800">Siphon 图片 MCP</text>
+  <text x="64" y="106" fill="#475569" font-family="Segoe UI, Microsoft YaHei, Arial, sans-serif" font-size="18">把 MCP 客户端连接到 GPT-Image-2 图片生成与编辑接口</text>
 
   <g filter="url(#shadow)">
     <rect x="70" y="165" width="230" height="185" rx="24" fill="url(#card)" stroke="#D8E4EA"/>
@@ -28,26 +28,27 @@
     <path d="M101 222c13-23 19-23 32 0" stroke="#0284C7" stroke-width="5" stroke-linecap="round"/>
     <circle cx="110" cy="211" r="4" fill="#0284C7"/>
     <circle cx="128" cy="211" r="4" fill="#0284C7"/>
-    <text x="150" y="210" fill="#0F172A" font-family="Segoe UI, Arial, sans-serif" font-size="22" font-weight="700">MCP Client</text>
-    <text x="100" y="260" fill="#475569" font-family="Segoe UI, Arial, sans-serif" font-size="16">Codex / Claude / Cline</text>
-    <text x="100" y="292" fill="#64748B" font-family="Segoe UI, Arial, sans-serif" font-size="14">call tools</text>
+    <text x="150" y="210" fill="#0F172A" font-family="Segoe UI, Microsoft YaHei, Arial, sans-serif" font-size="22" font-weight="700">MCP 客户端</text>
+    <text x="100" y="260" fill="#475569" font-family="Segoe UI, Microsoft YaHei, Arial, sans-serif" font-size="16">Codex / Claude / Cline</text>
+    <text x="100" y="292" fill="#64748B" font-family="Segoe UI, Microsoft YaHei, Arial, sans-serif" font-size="14">调用工具</text>
   </g>
 
   <g filter="url(#shadow)">
     <rect x="390" y="140" width="300" height="235" rx="26" fill="url(#card)" stroke="#BFE7EF"/>
     <rect x="425" y="176" width="230" height="54" rx="14" fill="#E0F7FA" stroke="#67E8F9"/>
-    <text x="453" y="210" fill="#0E7490" font-family="Segoe UI, Arial, sans-serif" font-size="19" font-weight="800">siphon_image MCP</text>
-    <text x="430" y="268" fill="#334155" font-family="Segoe UI, Arial, sans-serif" font-size="15">async jobs  |  queue  |  retry</text>
-    <text x="430" y="300" fill="#334155" font-family="Segoe UI, Arial, sans-serif" font-size="15">local save  |  metadata</text>
-    <text x="430" y="332" fill="#0F766E" font-family="Segoe UI, Arial, sans-serif" font-size="15" font-weight="700">default: 6 concurrent / 60 queued</text>
+    <text x="455" y="201" fill="#0E7490" font-family="Segoe UI, Microsoft YaHei, Arial, sans-serif" font-size="19" font-weight="800">本地 MCP 服务</text>
+    <text x="478" y="221" fill="#0E7490" font-family="Segoe UI, Microsoft YaHei, Arial, sans-serif" font-size="12">siphon_image</text>
+    <text x="430" y="268" fill="#334155" font-family="Segoe UI, Microsoft YaHei, Arial, sans-serif" font-size="15">异步任务  |  本地队列  |  失败重试</text>
+    <text x="430" y="300" fill="#334155" font-family="Segoe UI, Microsoft YaHei, Arial, sans-serif" font-size="15">文件落盘  |  元数据返回</text>
+    <text x="430" y="332" fill="#0F766E" font-family="Segoe UI, Microsoft YaHei, Arial, sans-serif" font-size="15" font-weight="700">默认：6 并发 / 60 排队</text>
   </g>
 
   <g filter="url(#shadow)">
     <rect x="790" y="165" width="230" height="185" rx="24" fill="url(#card)" stroke="#D8E4EA"/>
     <rect x="835" y="198" width="140" height="70" rx="18" fill="#DCFCE7" stroke="#86EFAC"/>
-    <text x="853" y="240" fill="#166534" font-family="Segoe UI, Arial, sans-serif" font-size="19" font-weight="800">SiphonLab</text>
-    <text x="837" y="293" fill="#475569" font-family="Segoe UI, Arial, sans-serif" font-size="15">/v1/images/generations</text>
-    <text x="867" y="318" fill="#475569" font-family="Segoe UI, Arial, sans-serif" font-size="15">/v1/images/edits</text>
+    <text x="853" y="240" fill="#166534" font-family="Segoe UI, Microsoft YaHei, Arial, sans-serif" font-size="19" font-weight="800">SiphonLab</text>
+    <text x="856" y="292" fill="#475569" font-family="Segoe UI, Microsoft YaHei, Arial, sans-serif" font-size="15">文生图接口</text>
+    <text x="856" y="318" fill="#475569" font-family="Segoe UI, Microsoft YaHei, Arial, sans-serif" font-size="15">图片编辑接口</text>
   </g>
 
   <g filter="url(#shadow)">
@@ -55,8 +56,8 @@
     <rect x="1101" y="201" width="88" height="72" rx="10" fill="#FDF2F8" stroke="#F9A8D4"/>
     <circle cx="1126" cy="226" r="11" fill="#F59E0B"/>
     <path d="M1107 263l27-25 18 16 12-10 20 19" stroke="#BE185D" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
-    <text x="1106" y="307" fill="#334155" font-family="Segoe UI, Arial, sans-serif" font-size="16" font-weight="700">Local files</text>
-    <text x="1114" y="331" fill="#64748B" font-family="Segoe UI, Arial, sans-serif" font-size="13">png/jpeg/webp</text>
+    <text x="1100" y="307" fill="#334155" font-family="Segoe UI, Microsoft YaHei, Arial, sans-serif" font-size="16" font-weight="700">本地文件</text>
+    <text x="1089" y="331" fill="#64748B" font-family="Segoe UI, Microsoft YaHei, Arial, sans-serif" font-size="13">png / jpeg / webp</text>
   </g>
 
   <path d="M310 258 C342 258 352 258 380 258" stroke="#0891B2" stroke-width="5" stroke-linecap="round" marker-end="url(#arrow)"/>
@@ -64,5 +65,5 @@
   <path d="M1028 258 C1040 258 1048 258 1060 258" stroke="#0891B2" stroke-width="5" stroke-linecap="round" marker-end="url(#arrow)"/>
 
   <rect x="430" y="420" width="420" height="42" rx="21" fill="#0F172A" opacity="0.9"/>
-  <text x="459" y="447" fill="#E2E8F0" font-family="Segoe UI, Arial, sans-serif" font-size="16">No image base64 in context by default. Files stay on disk.</text>
+  <text x="459" y="447" fill="#E2E8F0" font-family="Segoe UI, Microsoft YaHei, Arial, sans-serif" font-size="16">默认只返回路径和元数据；图片文件保存在本地磁盘。</text>
 </svg>
