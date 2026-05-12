@@ -1,0 +1,20 @@
+{
+  "name": "siphon-image-mcp",
+  "version": "0.1.0",
+  "description": "SiphonLab GPT-Image-2 MCP server for image generation and editing.",
+  "type": "module",
+  "bin": {
+    "siphon-image-mcp": "src/server.mjs"
+  },
+  "scripts": {
+    "start": "node src/server.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0"
+  },
+  "engines": {
+    "node": ">=18.18.0"
+  },
+  "license": "UNLICENSED"
+}
