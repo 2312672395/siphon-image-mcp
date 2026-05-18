@@ -1,6 +1,6 @@
 {
   "name": "siphon-image-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "SiphonLab GPT-Image-2 MCP server for image generation and editing.",
   "type": "module",
   "bin": {

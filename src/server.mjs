@@ -40,6 +40,7 @@ const DEFAULT_TIMEOUT_MS = 15 * 60 * 1000;
 const DEFAULT_MAX_ATTEMPTS = 3;
 const DEFAULT_RETRY_DELAY_MS = 800;
 const DEFAULT_JOB_TTL_MS = 30 * 60 * 1000;
+const DEFAULT_MAX_HISTORY = 500;
 const TERMINAL = new Set(['succeeded', 'failed', 'canceled', 'expired']);
 const IMAGE_INPUT_FIELDS = ['images', 'image', 'image_path', 'image_paths', 'input_image', 'input_images'];
 const MASK_INPUT_FIELDS = ['mask', 'mask_path'];
@@ -154,7 +155,9 @@ export async function generateImage(input = {}, options = {}) {
   const credentials = loadCredentials(options);
   const payload = buildPayload(input, { ...options, credentials });
   const response = await fetchImageWithRetry(credentials, payload, options);
+  assertNotCanceled(options);
   const items = await normalizeImageItems(response, credentials, options);
+  assertNotCanceled(options);
   const files = await writeImageOutputs(items, payload, input, options);
   return buildSuccessResult({ payload, response, files, retryCount: response.retryCount || 0, action: imageAction(payload) });
 }
@@ -167,7 +170,8 @@ export function createImageJobStore(options = {}) {
     runningCount: 0,
     maxConcurrent: resolveInt(options.maxConcurrent, DEFAULT_MAX_CONCURRENT, 1),
     maxQueue: resolveInt(options.maxQueue, DEFAULT_MAX_QUEUE, 0),
-    ttlMs: resolveInt(options.ttlMs, DEFAULT_JOB_TTL_MS, 1)
+    ttlMs: resolveInt(options.ttlMs, DEFAULT_JOB_TTL_MS, 1),
+    maxHistory: resolveInt(options.maxHistory, DEFAULT_MAX_HISTORY, 1)
   };
 }
 
@@ -176,10 +180,6 @@ export function createImageJob(input = {}, options = {}) {
   refreshStoreLimits(store, options);
   cleanupJobs(store);
   const idempotencyKey = String(input.idempotency_key || '').trim();
-  if (idempotencyKey && store.idempotency.has(idempotencyKey)) {
-    const existing = store.jobs.get(store.idempotency.get(idempotencyKey));
-    if (existing) return summarizeJob(existing, { reused: true });
-  }
   const queuedCount = store.queue.length;
   if (store.runningCount + queuedCount >= store.maxConcurrent + store.maxQueue) {
     return resultFromError(new SiphonImageError('Image job queue is full. Try again later.', {
@@ -192,7 +192,22 @@ export function createImageJob(input = {}, options = {}) {
   try {
     const credentials = loadCredentials(options);
     const payload = buildPayload(input, { ...options, credentials });
+    const requestIdentity = imageRequestIdentity(payload, input);
+    if (idempotencyKey && store.idempotency.has(idempotencyKey)) {
+      const existing = store.jobs.get(store.idempotency.get(idempotencyKey));
+      if (existing) {
+        if (existing.request_identity === requestIdentity) return summarizeJob(existing, { reused: true });
+        return resultFromError(new SiphonImageError('idempotency_key was already used for a different image request.', {
+          code: 'idempotency_conflict',
+          category: 'local_queue',
+          stage: 'local',
+          retryable: false
+        }));
+      }
+      store.idempotency.delete(idempotencyKey);
+    }
     const now = new Date().toISOString();
+    const requestedOutputFormat = normalizeFormat(input.output_format || input.format || DEFAULT_FORMAT) || DEFAULT_FORMAT;
     const job = {
       job_id: createId('img'),
       trace_id: createId('tr'),
@@ -204,7 +219,10 @@ export function createImageJob(input = {}, options = {}) {
       payload,
       input: { ...input },
       credentials,
-      output_format: normalizeFormat(input.output_format || input.format || DEFAULT_FORMAT) || DEFAULT_FORMAT,
+      idempotency_key: idempotencyKey || undefined,
+      request_identity: requestIdentity,
+      output_format: requestedOutputFormat,
+      requested_output_format: requestedOutputFormat,
       controller: new AbortController(),
       retry_count: 0
     };
@@ -218,6 +236,28 @@ export function createImageJob(input = {}, options = {}) {
     return summarizeJob(job);
   } catch (error) {
     return resultFromError(error);
+  }
+}
+
+function assertNotCanceled(options = {}) {
+  if (options.signal?.aborted) {
+    throw new SiphonImageError('SiphonLab image request was canceled.', {
+      code: 'request_canceled',
+      category: 'local',
+      stage: 'local',
+      retryable: false
+    });
+  }
+}
+
+function assertJobActive(job) {
+  if (job.cancel_requested || job.controller?.signal?.aborted || job.status === 'canceled') {
+    throw new SiphonImageError('Image job was canceled.', {
+      code: 'request_canceled',
+      category: 'local_queue',
+      stage: 'local',
+      retryable: false
+    });
   }
 }
 
@@ -453,10 +493,14 @@ function startJob(job, store, options) {
 async function runJob(job, store, options) {
   try {
     const response = await fetchImageWithRetry(job.credentials, job.payload, { ...options, signal: job.controller.signal });
+    assertJobActive(job);
     job.retry_count = response.retryCount || 0;
     const items = await normalizeImageItems(response, job.credentials, { ...options, signal: job.controller.signal });
-    const files = await writeImageOutputs(items, job.payload, job.input, options);
+    assertJobActive(job);
+    const files = await writeImageOutputs(items, job.payload, job.input, { ...options, signal: job.controller.signal });
+    assertJobActive(job);
     const result = buildSuccessResult({ payload: job.payload, response, files, retryCount: job.retry_count, action: job.action });
+    assertJobActive(job);
     job.files = files;
     job.result = result;
     markJob(job, 'succeeded');
@@ -630,19 +674,27 @@ async function normalizeImageItems(response, credentials, options = {}) {
 
 async function bytesFromImageItem(item, credentials, options = {}) {
   if (typeof item.b64_json === 'string' && item.b64_json.trim()) {
-    return { bytes: Buffer.from(item.b64_json, 'base64'), mime_type: 'image/png', source_type: 'b64_json' };
+    const bytes = Buffer.from(item.b64_json, 'base64');
+    const format = imageFormatFromBytes(bytes);
+    return { bytes, mime_type: mimeFromFormat(format || 'png'), source_type: 'b64_json' };
   }
   const url = String(item.url || '').trim();
   const dataURL = url.match(/^data:(image\/[a-z0-9.+-]+);base64,(.+)$/i);
-  if (dataURL) return { bytes: Buffer.from(dataURL[2], 'base64'), mime_type: dataURL[1], source_type: 'data_url' };
+  if (dataURL) {
+    const bytes = Buffer.from(dataURL[2], 'base64');
+    const format = imageFormatFromBytes(bytes) || formatFromMime(dataURL[1]);
+    return { bytes, mime_type: mimeFromFormat(format || DEFAULT_FORMAT), source_type: 'data_url' };
+  }
   if (/^https?:\/\//i.test(url)) {
     const fetchImpl = options.fetch || globalThis.fetch;
     const response = await fetchImpl(url, { headers: {}, signal: options.signal });
     if (!response.ok) throw httpError(response.status, await response.text());
     const arrayBuffer = await response.arrayBuffer();
+    const bytes = Buffer.from(arrayBuffer);
+    const format = imageFormatFromBytes(bytes) || formatFromMime(response.headers?.get?.('content-type')) || mimeFromUrl(url);
     return {
-      bytes: Buffer.from(arrayBuffer),
-      mime_type: response.headers?.get?.('content-type')?.split(';')[0] || mimeFromUrl(url) || 'image/png',
+      bytes,
+      mime_type: mimeFromFormat(format || DEFAULT_FORMAT),
       source_type: 'url'
     };
   }
@@ -656,9 +708,13 @@ async function bytesFromImageItem(item, credentials, options = {}) {
 
 async function writeImageOutputs(items, payload, input, options = {}) {
   const files = [];
+  assertNotCanceled(options);
+  const requestedOutputFormat = normalizeFormat(input.output_format || input.format || DEFAULT_FORMAT) || DEFAULT_FORMAT;
   for (let i = 0; i < items.length; i += 1) {
     const item = items[i];
-    const format = normalizeFormat(input.output_format || input.format || formatFromMime(item.mime_type) || DEFAULT_FORMAT) || DEFAULT_FORMAT;
+    assertNotCanceled(options);
+    const actualFormat = imageFormatFromBytes(item.bytes) || formatFromMime(item.mime_type) || requestedOutputFormat || DEFAULT_FORMAT;
+    const format = normalizeFormat(actualFormat) || DEFAULT_FORMAT;
     const target = resolveOutputPath(input.output_path, {
       format,
       index: i,
@@ -681,6 +737,7 @@ async function writeImageOutputs(items, payload, input, options = {}) {
       width: dimensions.width,
       height: dimensions.height,
       source_type: item.source_type,
+      requested_output_format: requestedOutputFormat,
       revised_prompt: item.revised_prompt
     });
   }
@@ -698,6 +755,7 @@ function buildSuccessResult({ payload, response, files, retryCount, action }) {
     n: files.length,
     format: first.format,
     output_format: first.output_format,
+    requested_output_format: first.requested_output_format || payload.output_format,
     quality: payload.quality,
     file: first.file,
     final_file: first.final_file,
@@ -730,7 +788,10 @@ function summarizeJob(job, options = {}) {
   };
   if (options.reused) base.reused = true;
   if (options.note) base.note = options.note;
-  if (job.result && (options.includeResult || TERMINAL.has(job.status))) Object.assign(base, job.result);
+  if (job.result && (options.includeResult || TERMINAL.has(job.status))) {
+    const { ok, status, ...result } = job.result;
+    Object.assign(base, result);
+  }
   if (job.error && options.includeError) base.error = job.error;
   return base;
 }
@@ -758,23 +819,69 @@ function cleanupJobs(store) {
     if (!TERMINAL.has(job.status)) continue;
     if (Date.parse(job.expires_at) < now) {
       markJob(job, 'expired');
+      pruneJob(job);
     }
   }
+  pruneHistory(store);
+  cleanupIdempotency(store);
 }
 
 function refreshStoreLimits(store, options = {}) {
   const env = options.env || process.env;
   store.maxConcurrent = resolveInt(options.maxConcurrent, resolveInt(env.SIPHON_IMAGE_MAX_CONCURRENT, store.maxConcurrent || DEFAULT_MAX_CONCURRENT, 1), 1);
   store.maxQueue = resolveInt(options.maxQueue, resolveInt(env.SIPHON_IMAGE_MAX_QUEUE, store.maxQueue || DEFAULT_MAX_QUEUE, 0), 0);
+  store.maxHistory = resolveInt(options.maxHistory, resolveInt(env.SIPHON_IMAGE_MAX_HISTORY, store.maxHistory || DEFAULT_MAX_HISTORY, 1), 1);
 }
 
 function getStore(options = {}) {
   if (options.store) return options.store;
   if (!defaultStore) defaultStore = createImageJobStore({
     maxConcurrent: resolveInt(process.env.SIPHON_IMAGE_MAX_CONCURRENT, DEFAULT_MAX_CONCURRENT, 1),
-    maxQueue: resolveInt(process.env.SIPHON_IMAGE_MAX_QUEUE, DEFAULT_MAX_QUEUE, 0)
+    maxQueue: resolveInt(process.env.SIPHON_IMAGE_MAX_QUEUE, DEFAULT_MAX_QUEUE, 0),
+    maxHistory: resolveInt(process.env.SIPHON_IMAGE_MAX_HISTORY, DEFAULT_MAX_HISTORY, 1)
   });
   return defaultStore;
+}
+
+function pruneJob(job) {
+  if (job.pruned) return;
+  delete job.credentials;
+  delete job.input;
+  delete job.controller;
+  if (job.payload) job.payload = stripImageReferenceData(job.payload);
+  job.pruned = true;
+}
+
+function pruneHistory(store) {
+  const terminalJobs = [...store.jobs.values()]
+    .filter((job) => TERMINAL.has(job.status))
+    .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+  const excess = terminalJobs.length - store.maxHistory;
+  if (excess <= 0) return;
+  for (const job of terminalJobs.slice(0, excess)) {
+    store.jobs.delete(job.job_id);
+  }
+}
+
+function cleanupIdempotency(store) {
+  for (const [key, jobId] of store.idempotency.entries()) {
+    const job = store.jobs.get(jobId);
+    if (!job || job.status === 'expired') store.idempotency.delete(key);
+  }
+}
+
+function stripImageReferenceData(value) {
+  if (Array.isArray(value)) return value.map(stripImageReferenceData);
+  if (!value || typeof value !== 'object') return value;
+  const out = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (key === 'image_url' && typeof item === 'string' && /^data:image\//i.test(item)) {
+      out[key] = '[redacted image data]';
+    } else {
+      out[key] = stripImageReferenceData(item);
+    }
+  }
+  return out;
 }
 
 function validatePayload(payload) {
@@ -860,12 +967,20 @@ function resolveOutputPath(outputPath, context) {
     target = path.join(base, `${stem}${suffix}.${format}`);
   } else if (context.count > 1) {
     const ext = path.extname(base);
-    target = path.join(path.dirname(base), `${path.basename(base, ext)}-${context.index + 1}${ext || `.${format}`}`);
+    target = path.join(path.dirname(base), `${path.basename(base, ext)}-${context.index + 1}.${format}`);
   } else {
-    target = base;
+    target = pathWithFormat(base, format);
   }
   if (context.overwrite) return target;
   return uniquePath(target);
+}
+
+function pathWithFormat(filePath, format) {
+  const ext = path.extname(filePath);
+  if (!ext) return `${filePath}.${format}`;
+  const current = normalizeFormat(ext.slice(1));
+  if (current === format) return filePath;
+  return path.join(path.dirname(filePath), `${path.basename(filePath, ext)}.${format}`);
 }
 
 function defaultOutputDir(env = process.env) {
@@ -897,6 +1012,24 @@ function imageAction(payload) {
   return payload.images && payload.images.length > 0 ? 'edit' : 'generate';
 }
 
+function imageRequestIdentity(payload, input = {}) {
+  const requestedOutputFormat = normalizeFormat(input.output_format || input.format || DEFAULT_FORMAT) || DEFAULT_FORMAT;
+  return crypto.createHash('sha256').update(stableStringify({
+    payload,
+    output_path: input.output_path ? expandHome(input.output_path) : '',
+    overwrite: input.overwrite === true,
+    requested_output_format: requestedOutputFormat
+  })).digest('hex');
+}
+
+function stableStringify(value) {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
 function copyOptional(payload, input, key) {
   if (input[key] !== undefined && input[key] !== null && input[key] !== '') payload[key] = input[key];
 }
@@ -925,6 +1058,14 @@ function mimeFromFormat(format) {
   if (format === 'jpeg') return 'image/jpeg';
   if (format === 'webp') return 'image/webp';
   return 'image/png';
+}
+
+function imageFormatFromBytes(bytes) {
+  if (!Buffer.isBuffer(bytes)) return '';
+  if (bytes.length >= 8 && bytes.slice(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return 'png';
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'jpeg';
+  if (bytes.length >= 12 && bytes.slice(0, 4).toString('ascii') === 'RIFF' && bytes.slice(8, 12).toString('ascii') === 'WEBP') return 'webp';
+  return '';
 }
 
 function mimeFromPath(filePath) {
